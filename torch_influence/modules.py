@@ -2,7 +2,9 @@ import logging
 from typing import Callable, Optional
 
 import numpy as np
+import scipy.sparse
 import scipy.sparse.linalg as L
+from scipy.sparse.linalg import spsolve
 import torch
 from torch import nn
 from torch.utils import data
@@ -29,6 +31,8 @@ class AutogradInfluenceModule(BaseInfluenceModule):
         check_eigvals: if ``True``, this initializer checks that the damped risk Hessian
             is positive definite, and raises a :mod:`ValueError` if it is not. Otherwise,
             no check is performed.
+        mask: binary mask for Hessian entries.
+        sparse: whether to use sparse routines.
 
     Warnings:
         This module scales poorly with the number of model parameters :math:`d`. In
@@ -45,7 +49,9 @@ class AutogradInfluenceModule(BaseInfluenceModule):
             test_loader: data.DataLoader,
             device: torch.device,
             damp: float,
-            check_eigvals: bool = False
+            check_eigvals: bool = False,
+            mask: Optional[torch.Tensor] = None,    # New parameter: binary mask for Hessian entries.
+            sparse: bool = False                     # New parameter: whether to use sparse routines.
     ):
         super().__init__(
             model=model,
@@ -54,8 +60,9 @@ class AutogradInfluenceModule(BaseInfluenceModule):
             test_loader=test_loader,
             device=device,
         )
-
         self.damp = damp
+        self.mask = mask
+        self.sparse = sparse
 
         params = self._model_make_functional()
         flat_params = self._flatten_params_like(params)
@@ -76,6 +83,10 @@ class AutogradInfluenceModule(BaseInfluenceModule):
             hess = hess / len(self.train_loader.dataset)
             hess = hess + damp * torch.eye(d, device=hess.device)
 
+            # Apply binary mask: entries set to 1 in the mask become 0 in the Hessian.
+            if self.mask is not None:
+                hess = hess.masked_fill(self.mask.bool(), 0)
+
             if check_eigvals:
                 eigvals = np.linalg.eigvalsh(hess.cpu().numpy())
                 logging.info("hessian min eigval %f", np.min(eigvals).item())
@@ -83,9 +94,21 @@ class AutogradInfluenceModule(BaseInfluenceModule):
                 if not bool(np.all(eigvals >= 0)):
                     raise ValueError()
 
-            self.inverse_hess = torch.inverse(hess)
+            if self.sparse:
+                # Convert dense Hessian to a SciPy sparse matrix.
+                self.hess_sp = scipy.sparse.csr_matrix(hess.cpu().numpy())
+                self.inverse_hess = None  # (Not precomputed in sparse mode)
+            else:
+                self.inverse_hess = torch.inverse(hess)
 
     def inverse_hvp(self, vec):
+        # If using sparse mode, solve the system using a sparse solver.
+        if self.sparse:
+            
+            vec_np = vec.cpu().numpy()
+            sol = spsolve(self.hess_sp, vec_np)
+            return torch.tensor(sol, device=self.device, dtype=vec.dtype)
+        # Otherwise, use the computed dense inverse.
         return self.inverse_hess @ vec
 
 
@@ -170,21 +193,21 @@ class LiSSAInfluenceModule(BaseInfluenceModule):
     by using truncated Neumann iterations:
 
     .. math::
-        \mathbf{H}^{-1}\mathbf{v} \approx \frac{1}{R}\sum\limits_{r = 1}^R
-        \left(\sigma^{-1}\sum_{t = 1}^{T}(\mathbf{I} - \sigma^{-1}\mathbf{H}_{r, t})^t\mathbf{v}\right)
+        \mathbf{H}^{-1}\mathbf{v} \approx \frac{1}{R}\sum\limits{r = 1}^R
+        \left(\sigma^{-1}\sum{t = 1}^T(\mathbf{I} - \sigma^{-1}\mathbf{H}{r, t})^t\mathbf{v}\right)
 
-    Here, :math:`\mathbf{H}` is the risk Hessian matrix and :math:`\mathbf{H}_{r, t}` are
+    Here, :math:`\mathbf{H}` is the risk Hessian matrix and :math:`\mathbf{H}{r, t}` are
     loss Hessian matrices over batches of training data drawn randomly with replacement (we
     also use a batch size in ``train_loader``). In addition, :math:`\sigma > 0` is a scaling
     factor chosen sufficiently large such that :math:`\sigma^{-1} \mathbf{H} \preceq \mathbf{I}`.
 
     In practice, we can compute each inner sum recursively. Starting with
-    :math:`\mathbf{h}_{r, 0} = \mathbf{v}`, we can iteratively update for :math:`T` steps:
+    :math:`\mathbf{h}{r, 0} = \mathbf{v}`, we can iteratively update for :math:`T` steps:
 
     .. math::
-        \mathbf{h}_{r, t} = \mathbf{v} + \mathbf{h}_{r, t - 1} - \sigma^{-1}\mathbf{H}_{r, t}\mathbf{h}_{r, t - 1}
+        \mathbf{h}{r, t} = \mathbf{v} + \mathbf{h}{r, t - 1} - \sigma^{-1}\mathbf{H}{r, t}\mathbf{h}{r, t - 1}
 
-    where :math:`\mathbf{h}_{r, T}` will be equal to the :math:`r`-th inner sum.
+    where :math:`\mathbf{h}{r, T}` will be equal to the :math:`r`-th inner sum.
 
     Args:
         model: the model of interest.
