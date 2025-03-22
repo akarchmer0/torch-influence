@@ -11,7 +11,7 @@ from torch import nn
 from torch.utils import data
 from tqdm import tqdm, trange
 
-from torch_influence import BaseObjective, CGInfluenceModule
+from torch_influence import BaseObjective, CGInfluenceModule, AutogradInfluenceModule
 
 
 # Example-specific constants
@@ -118,6 +118,10 @@ def captioned_image(model, embeds, split, idx, scores):
 def main():
     print(f"Using {DEVICE}")
 
+    IF_type = "Autograd"  # Choose between 'CG' and 'Autograd'
+
+    print(f"Computing IF using {IF_type}")
+
     # ===========
     # Load model and data
     # ==========
@@ -131,6 +135,12 @@ def main():
     X_test = torch.tensor(embeds["X_test"])
     Y_test = torch.tensor(embeds["Y_test"])
     test_set = data.TensorDataset(X_test, Y_test)
+
+    # Truncate data (for debugging)
+    X_train = X_train[:50]
+    Y_train = Y_train[:50]
+    X_test = X_test[:20]
+    Y_test = Y_test[:20]
 
     clf = fit_model(X_train, Y_train)
 
@@ -163,16 +173,30 @@ def main():
             outputs = model(batch[0])
             return F.binary_cross_entropy(outputs, batch[1])
 
-    module = CGInfluenceModule(
-        model=clf,
-        objective=BinClassObjective(),
-        train_loader=data.DataLoader(train_set, batch_size=32),
-        test_loader=data.DataLoader(test_set, batch_size=32),
-        device=DEVICE,
-        damp=0.001,
-        atol=1e-8,
-        maxiter=1000,
-    )
+
+    if IF_type == 'CG':
+
+        module = CGInfluenceModule(
+            model=clf,
+            objective=BinClassObjective(),
+            train_loader=data.DataLoader(train_set, batch_size=32),
+            test_loader=data.DataLoader(test_set, batch_size=32),
+            device=DEVICE,
+            damp=0.001,
+            atol=1e-8,
+            maxiter=1000,
+        )
+    
+    elif IF_type == 'Autograd':
+
+        module = AutogradInfluenceModule(
+            model=clf,
+            objective=BinClassObjective(),
+            train_loader=data.DataLoader(train_set, batch_size=32),
+            test_loader=data.DataLoader(test_set, batch_size=32),
+            device=DEVICE,
+            damp=0.001,
+        )
 
     # ===========
     # For each test point:
@@ -225,7 +249,12 @@ def main():
         r = fig.canvas.get_renderer()
         return ax_.get_tightbbox(r).transformed(fig.transFigure.inverted())
 
-    bboxes = np.array(list(map(get_bbox, axes.flat)), mtrans.Bbox).reshape(axes.shape)
+    # Build the bboxes array explicitly to match the shape of axes.
+    bboxes = np.empty(axes.shape, dtype=object)
+    for i in range(axes.shape[0]):
+        for j in range(axes.shape[1]):
+            bboxes[i, j] = get_bbox(axes[i, j])
+
     xmax = np.array(list(map(lambda b: b.x1, bboxes.flat))).reshape(axes.shape).max(axis=0)
     xmin = np.array(list(map(lambda b: b.x0, bboxes.flat))).reshape(axes.shape).min(axis=0)
     xs = np.c_[xmax[1:], xmin[:-1]].mean(axis=1)
