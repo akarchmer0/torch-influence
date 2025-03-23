@@ -39,6 +39,12 @@ pip install -e .
 
 ______________________________________________________________________
 
+## This Version
+
+This version of torch-influence allows you to specify a list of "important parameters". When you use the `AutogradInfluenceModule`, the list of important parameters specifies a submatrix of the Hessian to directly compute (instead of the whole thing). Then, the IHVP is computed using a sparse solver. This greatly reduces space complexity and improves computational complexity.
+
+______________________________________________________________________
+
 ## Quickstart
 
 ### Overview
