@@ -189,13 +189,17 @@ def main():
     
     elif IF_type == 'Autograd':
 
+        # Remove the mask parameter
         module = AutogradInfluenceModule(
-            model=clf,
+            model=clf,  
             objective=BinClassObjective(),
             train_loader=data.DataLoader(train_set, batch_size=32),
             test_loader=data.DataLoader(test_set, batch_size=32),
             device=DEVICE,
             damp=0.001,
+            check_eigvals=True,
+            sparse=True,
+            important_param_indices=[i for i in range(50)]  # Just using first 10 params as an example
         )
 
     # ===========
