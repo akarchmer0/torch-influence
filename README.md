@@ -1,5 +1,13 @@
 <div align="center">    
 
+## This Version
+
+This version of torch-influence allows you to specify a list of "important parameters". When you use the `AutogradInfluenceModule`, the list of important parameters specifies a submatrix of the Hessian to directly compute (instead of the whole thing). Then, the IHVP is computed using a sparse solver. This greatly reduces space complexity and improves computational complexity.
+
+______________________________________________________________________
+
+
+
 # torch-influence
 
 ![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/alstonlo/torch-influence)
@@ -23,27 +31,6 @@ This library aims to be simple and minimal. In addition, it fixes a few errors f
 implementations of influence functions.
 
 The code is supplement to the paper [If Influence Functions are the Answer, Then What is the Question?](https://arxiv.org/abs/2209.05364). Furthermore, the Jax implementation can be found at [here](https://github.com/pomonam/jax-influence).
-
-______________________________________________________________________
-
-## Installation
-
-Pip from source:
-
-```bash
-git clone https://github.com/alstonlo/torch-influence
- 
-cd torch_influence
-pip install -e .   
- ```
-
-______________________________________________________________________
-
-## This Version
-
-This version of torch-influence allows you to specify a list of "important parameters". When you use the `AutogradInfluenceModule`, the list of important parameters specifies a submatrix of the Hessian to directly compute (instead of the whole thing). Then, the IHVP is computed using a sparse solver. This greatly reduces space complexity and improves computational complexity.
-
-______________________________________________________________________
 
 ## Quickstart
 
